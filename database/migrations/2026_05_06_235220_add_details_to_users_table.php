@@ -12,9 +12,9 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            // Menambahkan kolom spesialisasi untuk dokter dan unit untuk perawat
             $table->string('specialization')->nullable()->after('role');
             $table->string('unit')->nullable()->after('specialization');
+            $table->string('status')->default('aktif')->after('unit');
         });
     }
 
@@ -24,8 +24,7 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            // Menghapus kolom jika di-rollback
-            $table->dropColumn(['specialization', 'unit']);
+            $table->dropColumn(['specialization', 'unit', 'status']);
         });
     }
 };

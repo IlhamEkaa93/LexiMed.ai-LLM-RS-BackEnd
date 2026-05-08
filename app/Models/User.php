@@ -6,25 +6,29 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
-use Spatie\Permission\Traits\HasRoles; // Tambahkan jika menggunakan Spatie
+use Spatie\Permission\Traits\HasRoles; // <-- WAJIB AKTIF UNTUK SEEDER & ROLE
 
 class User extends Authenticatable
 {
-    use HasApiTokens, HasFactory, Notifiable, HasRoles;
+    use HasApiTokens, HasFactory, Notifiable, HasRoles; 
 
     /**
      * Kolom-kolom yang dapat diisi secara massal (Mass Assignment).
+     * Pastikan semua kolom baru masuk ke sini agar tidak diblokir oleh Laravel.
      */
     protected $fillable = [
         'name',
         'username', // Digunakan sebagai ID Institusi/NIP saat login
         'email',    
         'password',
-        'role',     // Untuk membedakan hak akses[cite: 1]
+        'role',     // Untuk membedakan hak akses (frontend)
+        'unit',           
+        'status',         
+        'specialization'  
     ];
 
     /**
-     * Kolom yang harus disembunyikan saat dikonversi ke JSON.
+     * Kolom yang harus disembunyikan saat dikonversi ke JSON/Array.
      */
     protected $hidden = [
         'password',
@@ -41,7 +45,7 @@ class User extends Authenticatable
 
     /**
      * Helper tambahan:
-     * Memastikan Laravel tahu bahwa kita login menggunakan 'username'.
+     * Memastikan Laravel tahu bahwa kita login menggunakan 'username' (bukan email).
      */
     public function getAuthIdentifierName()
     {

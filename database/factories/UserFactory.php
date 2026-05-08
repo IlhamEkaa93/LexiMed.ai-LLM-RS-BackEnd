@@ -25,10 +25,17 @@ class UserFactory extends Factory
     {
         return [
             'name' => fake()->name(),
+            // Tambahan wajib agar tidak error "not null violation" di PostgreSQL
+            'username' => fake()->unique()->userName(), 
             'email' => fake()->unique()->safeEmail(),
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
             'remember_token' => Str::random(10),
+            // Tambahan default kolom baru
+            'role' => 'dokter', 
+            'unit' => null,
+            'status' => 'aktif',
+            'specialization' => null,
         ];
     }
 

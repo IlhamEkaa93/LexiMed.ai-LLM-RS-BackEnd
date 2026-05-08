@@ -5,19 +5,42 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration {
+    /**
+     * Jalankan Migrasi untuk tabel Patients (PostgreSQL)
+     */
     public function up(): void {
         Schema::create('patients', function (Blueprint $table) {
-            $table->string('no_rm')->primary(); // Primary Key String
+            // No Rekam Medis sebagai Primary Key
+            $table->string('no_rm')->primary(); 
+            
+            // Kolom Gelar/Panggilan (An, Ny, Tn, Nona)
+            $table->string('title')->nullable(); 
+            
+            // Nama Lengkap
             $table->string('name');
-            $table->integer('age');
-            $table->string('gender'); // L atau P
-            $table->string('unit'); // Ruang/Bangsal
-            $table->string('dpjp'); // Dokter Penanggung Jawab
-            $table->string('status_treatment'); // Rawat Inap / Jalan
+            
+            // Umur (Integer)
+            $table->integer('age')->nullable();
+            
+            // Jenis Kelamin (Dibuat string panjang agar bisa menampung "Laki-Laki" / "Perempuan")
+            $table->string('gender')->nullable(); 
+            
+            // Unit / Poli / Bangsal
+            $table->string('unit')->nullable(); 
+            
+            // Dokter Penanggung Jawab
+            $table->string('dpjp')->nullable(); 
+            
+            // Status Perawatan (Rawat Inap, Jalan, IGD)
+            $table->string('status_treatment')->nullable(); 
+            
             $table->timestamps();
         });
     }
 
+    /**
+     * Batalkan Migrasi
+     */
     public function down(): void {
         Schema::dropIfExists('patients');
     }
