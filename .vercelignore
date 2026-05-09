@@ -2,3 +2,5 @@
 /.env
 /node_modules
 /tests
+/bootstrap/cache/*.php
+/storage/framework/views/*.php
