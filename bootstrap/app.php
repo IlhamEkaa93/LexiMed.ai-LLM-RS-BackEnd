@@ -12,13 +12,8 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
-        // Daftarkan Middleware Cors buatan kita ke urutan paling atas
         $middleware->prepend(\App\Http\Middleware\Cors::class);
-
-        // Kecualikan proteksi CSRF untuk rute API agar tidak Error 419
-        $middleware->validateCsrfTokens(except: [
-            'api/*',
-        ]);
+        $middleware->validateCsrfTokens(except: ['api/*']);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         //
