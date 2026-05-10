@@ -1,3 +1,3 @@
 <?php
-// Forward Vercel requests to normal Laravel public folder
+// Meneruskan permintaan dari server Vercel ke mesin utama Laravel
 require __DIR__ . '/../public/index.php';
