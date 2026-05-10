@@ -1,5 +1,4 @@
 <?php
-
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -14,16 +13,17 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
-        // MATIKAN MIDDLEWARE CORS LARAVEL SECARA TOTAL
+        // MATIKAN CORS BAWAAN LARAVEL AGAR TIDAK DOUBLE HEADER!
+        $middleware->remove(\Illuminate\Http\Middleware\HandleCors::class);
+        
         $middleware->validateCsrfTokens(except: ['api/*', '*']);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         $exceptions->render(function (Throwable $e, Request $request) {
             if ($request->is('api/*')) {
                 return response()->json([
-                    'PESAN_ERROR_ASLI' => $e->getMessage(),
-                    'FILE_YANG_RUSAK' => $e->getFile(),
-                    'BARIS' => $e->getLine()
+                    'success' => false,
+                    'message' => $e->getMessage()
                 ], 500);
             }
         });
