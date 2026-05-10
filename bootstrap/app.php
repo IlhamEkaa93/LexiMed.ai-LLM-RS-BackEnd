@@ -1,4 +1,5 @@
 <?php
+
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -11,9 +12,15 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
-        // Prepend menaruh CORS di pintu paling depan sebelum sistem Laravel lain jalan
+        // 1. Posisikan CORS di paling depan
         $middleware->prepend(\App\Http\Middleware\Cors::class);
-        $middleware->validateCsrfTokens(except: ['api/*']);
+        
+        // 2. MATIKAN SATPAM CSRF UNTUK API (Solusi Error 419)
+        $middleware->validateCsrfTokens(except: [
+            'api/*',
+            'api/token',
+            '*' // Opsi nuklir: abaikan CSRF sepenuhnya jika backend hanya untuk API
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         //
