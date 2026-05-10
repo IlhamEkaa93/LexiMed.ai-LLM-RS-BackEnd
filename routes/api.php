@@ -100,7 +100,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     /**
-     * STATISTIK DASHBOARD (Untuk Dashboard Perawat)
+     * STATISTIK DASHBOARD (Untuk Dashboard Perawat & Admin)
      */
     Route::get('/dashboard-stats', function() {
         try {
@@ -120,7 +120,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     /**
-     * MODUL RADIOLOGI (DITAMBAHKAN AGAR TIDAK 404)
+     * MODUL RADIOLOGI
      */
     Route::get('/radiology/dashboard', function() {
         return response()->json([
@@ -136,7 +136,6 @@ Route::middleware('auth:sanctum')->group(function () {
     /**
      * CLINICAL DATA (Ambil & Input)
      */
-    // Rute GET untuk mengambil daftar data klinis (Memperbaiki error 405)
     Route::get('/clinical-data', function() {
         try {
             $data = ClinicalData::orderBy('created_at', 'desc')->get();
@@ -149,7 +148,6 @@ Route::middleware('auth:sanctum')->group(function () {
         }
     });
 
-    // Rute POST untuk simpan data klinis
     Route::post('/clinical-data', function(Request $request) {
         DB::beginTransaction();
         try {
