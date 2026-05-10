@@ -12,32 +12,18 @@ use App\Http\Controllers\Api\KnowledgeController;
 use App\Models\ClinicalData;
 use App\Models\User;
 
-/*
-|--------------------------------------------------------------------------
-| API Routes - DARSI RS UNS (Full Intelligence System)
-|--------------------------------------------------------------------------
-*/
-
-// --- 0. FALLBACK UNAUTHORIZED ---
 Route::get('/unauthorized', function () {
     return response()->json(['success' => false, 'message' => 'Sesi Berakhir.'], 401);
 })->name('login');
 
-
-// --- 1. AUTHENTICATION (Public) ---
 Route::post('/token', function (Request $request) {
-    $request->validate([
-        'username' => 'required',
-        'password' => 'required',
-    ]);
-
+    $request->validate(['username' => 'required', 'password' => 'required']);
     $credentials = $request->only('username', 'password');
     
     if (Auth::attempt($credentials)) {
         $user = Auth::user();
         $user->tokens()->delete(); 
         
-        // [FITUR BARU] CATAT AKTIVITAS LOGIN KE AUDIT LOG
         DB::table('audit_logs')->insert([
             'user_id'     => $user->id,
             'action'      => 'LOGIN',
@@ -57,17 +43,11 @@ Route::post('/token', function (Request $request) {
             ]
         ], 200);
     }
-    
     return response()->json(['success' => false, 'message' => 'Kredensial tidak valid.'], 401);
 });
 
-
-// --- 2. PROTECTED ROUTES (Requires Bearer Token) ---
 Route::middleware('auth:sanctum')->group(function () {
 
-    /**
-     * REALTIME AUDIT LOGS (100% AKTIF TANPA PEREDAM)
-     */
     Route::get('/audit-logs', function() {
         try {
             $logs = DB::table('audit_logs')
@@ -86,31 +66,18 @@ Route::middleware('auth:sanctum')->group(function () {
                         'status' => 'Success'
                     ];
                 });
-
-            return response()->json([
-                'success' => true,
-                'logs'    => $logs,
-                'stats'   => [
-                    'total'  => DB::table('audit_logs')->count(),
-                    'alerts' => DB::table('audit_logs')->where('action', 'LIKE', '%ALERT%')->count(),
-                    'time'   => '1.1s' 
-                ]
-            ], 200);
+            return response()->json(['success' => true, 'logs' => $logs, 'stats' => ['total' => DB::table('audit_logs')->count(), 'alerts' => DB::table('audit_logs')->where('action', 'LIKE', '%ALERT%')->count(), 'time' => '1.1s']], 200);
         } catch (\Exception $e) {
-            Log::error("Audit Log Error: " . $e->getMessage());
             return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }
     });
 
-    /**
-     * STATISTIK DASHBOARD
-     */
     Route::get('/dashboard-stats', function() {
         try {
             return response()->json([
                 'success' => true,
                 'total_staff'       => DB::table('users')->count(),
-                'total_logs'        => DB::table('audit_logs')->count(), // Menampilkan jumlah baris di audit logs
+                'total_logs'        => DB::table('audit_logs')->count(),
                 'total_documents'   => DB::table('knowledge_bases')->count(),
                 'system_uptime'     => '99.9%',
                 'today_patients'    => DB::table('patients')->whereDate('created_at', date('Y-m-d'))->count(),
@@ -122,23 +89,10 @@ Route::middleware('auth:sanctum')->group(function () {
         }
     });
 
-    /**
-     * MODUL RADIOLOGI
-     */
     Route::get('/radiology/dashboard', function() {
-        return response()->json([
-            'stats' => [
-                'total_scans' => DB::table('clinical_data')->where('source', 'radiologi')->count(),
-                'pending_analysis' => DB::table('clinical_data')->where('source', 'radiologi')->where('status', 'draft')->count(),
-                'ai_verified' => DB::table('clinical_data')->where('source', 'radiologi')->where('status', 'verified')->count()
-            ],
-            'recent_work' => []
-        ], 200);
+        return response()->json(['stats' => ['total_scans' => DB::table('clinical_data')->where('source', 'radiologi')->count(), 'pending_analysis' => DB::table('clinical_data')->where('source', 'radiologi')->where('status', 'draft')->count(), 'ai_verified' => DB::table('clinical_data')->where('source', 'radiologi')->where('status', 'verified')->count()], 'recent_work' => []], 200);
     });
 
-    /**
-     * CLINICAL DATA (Ambil & Input)
-     */
     Route::get('/clinical-data', function() {
         try {
             $data = ClinicalData::orderBy('created_at', 'desc')->get();
@@ -151,18 +105,25 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/clinical-data', function(Request $request) {
         DB::beginTransaction();
         try {
+            // FIX 1: Ubah JSON Array dari Frontend menjadi String Text agar Postgres menerimanya
+            $rawContent = is_array($request->raw_content) ? json_encode($request->raw_content) : $request->raw_content;
+            
+            // FIX 2: Paksa nilai 'source' hanya menggunakan nilai yang diizinkan oleh tabel Enum
+            $validSources = ['manual', 'whatsapp', 'voice'];
+            $reqSource = $request->source ?? 'manual';
+            $finalSource = in_array($reqSource, $validSources) ? $reqSource : 'manual';
+
             $data = ClinicalData::create([
                 'patient_id'  => $request->patient_id,
-                'raw_content' => $request->raw_content,
+                'raw_content' => $rawContent,
                 'blood_pressure' => $request->blood_pressure ?? null,
                 'heart_rate' => $request->heart_rate ?? null,
                 'temperature' => $request->temperature ?? null,
                 'oxygen_saturation' => $request->oxygen_saturation ?? null,
                 'status'      => $request->status ?? 'draft',
-                'source'      => $request->source ?? 'nurse_note'
+                'source'      => $finalSource
             ]);
 
-            // CATAT LOG OTOMATIS
             if (Auth::check()) {
                 $user = Auth::user();
                 DB::table('audit_logs')->insert([
@@ -186,9 +147,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/clinical-data/{norm}', [ClinicalDataController::class, 'show']);
     Route::post('/clinical-data/{norm}/generate-ai', [ClinicalDataController::class, 'generateAI']);
     
-    /**
-     * VERIFIKASI DOKTER (Approve Final)
-     */
     Route::patch('/clinical-data/{norm}/verify', function($norm, Request $request) {
         DB::beginTransaction();
         try {
@@ -209,7 +167,6 @@ Route::middleware('auth:sanctum')->group(function () {
                         'updated_at'  => now()
                     ]);
                 }
-                
                 DB::commit();
                 return response()->json(['success' => true, 'message' => 'Dokumen klinis divalidasi.'], 200);
             }
@@ -220,56 +177,27 @@ Route::middleware('auth:sanctum')->group(function () {
         }
     });
 
-    /**
-     * NEURAL RAG ENGINE
-     */
     Route::post('/rag-guideline', function(Request $request) {
         try {
             $patientId = $request->input('patient_id');
             $clinicalData = ClinicalData::where('patient_id', $patientId)->latest()->first();
-
-            $guideline = DB::table('knowledge_bases')
-                            ->where('title', 'LIKE', '%' . ($clinicalData->diagnosis ?? 'Medis') . '%')
-                            ->orWhere('category', 'LIKE', '%SOP%')
-                            ->first();
-
+            $guideline = DB::table('knowledge_bases')->where('title', 'LIKE', '%' . ($clinicalData->diagnosis ?? 'Medis') . '%')->orWhere('category', 'LIKE', '%SOP%')->first();
+            
             if (Auth::check()) {
                 $user = Auth::user();
-                DB::table('audit_logs')->insert([
-                    'user_id'     => $user->id,
-                    'action'      => 'RAG KNOWLEDGE INDEXING',
-                    'description' => "User {$user->name} mencari pedoman klinis untuk RM: {$patientId}",
-                    'created_at'  => now(),
-                    'updated_at'  => now()
-                ]);
+                DB::table('audit_logs')->insert(['user_id' => $user->id, 'action' => 'RAG KNOWLEDGE INDEXING', 'description' => "User {$user->name} mencari pedoman klinis untuk RM: {$patientId}", 'created_at' => now(), 'updated_at' => now()]);
             }
-
-            return response()->json([
-                'success' => true,
-                'source' => $guideline->title ?? 'PPK Penatalaksanan Klinis RS UNS',
-                'ai_recommendation' => "Berdasarkan analisis rekam medis, pasien membutuhkan pemantauan saturasi oksigen berkala.",
-                'clinical_notes' => "Prioritaskan stabilisasi jalan napas.",
-                'evidence_level' => "Evidence Level: A",
-                'document_url' => $guideline->file_path ?? "#",
-            ], 200);
-
-        } catch (\Exception $e) {
-            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
-        }
+            return response()->json(['success' => true, 'source' => $guideline->title ?? 'PPK Penatalaksanan Klinis RS UNS', 'ai_recommendation' => "Berdasarkan analisis rekam medis, pasien membutuhkan pemantauan saturasi oksigen berkala.", 'clinical_notes' => "Prioritaskan stabilisasi jalan napas.", 'evidence_level' => "Evidence Level: A", 'document_url' => $guideline->file_path ?? "#"], 200);
+        } catch (\Exception $e) { return response()->json(['success' => false, 'message' => $e->getMessage()], 500); }
     });
 
-    /**
-     * MASTER DATA & CRUD
-     */
     Route::get('/users', [UserController::class, 'index']);
     Route::post('/users', [UserController::class, 'store']);
     Route::put('/users/{id}', [UserController::class, 'update']);
     Route::delete('/users/{id}', [UserController::class, 'destroy']);
-    
     Route::get('/knowledge', [KnowledgeController::class, 'index']);
     Route::post('/knowledge', [KnowledgeController::class, 'store']);
     Route::delete('/knowledge/{id}', [KnowledgeController::class, 'destroy']);
-
     Route::get('/patients-list', [PatientController::class, 'index']); 
     Route::get('/patients/{query}', [PatientController::class, 'show']); 
     Route::post('/patients', [PatientController::class, 'store']);
@@ -278,22 +206,10 @@ Route::middleware('auth:sanctum')->group(function () {
         try {
             $history = ClinicalData::where('patient_id', $rm)->where('status', 'verified')->orderBy('created_at', 'desc')->get();
             return response()->json($history, 200);
-        } catch (\Exception $e) {
-            return response()->json(['message' => $e->getMessage()], 500);
-        }
+        } catch (\Exception $e) { return response()->json(['message' => $e->getMessage()], 500); }
     });
 
     Route::get('/manajemen/dashboard', function() {
-        return response()->json([
-            'stats' => [
-                'totalPasien'  => DB::table('patients')->count(),
-                'avgTunggu'    => '45m',
-                'utilBed'      => '82%',
-                'totalLayanan' => 3420
-            ],
-            'reports' => [
-                ['id' => 1, 'date' => date('Y-m-d'), 'title' => 'Laporan Performa UGD', 'status' => 'Final']
-            ]
-        ], 200);
+        return response()->json(['stats' => ['totalPasien' => DB::table('patients')->count(), 'avgTunggu' => '45m', 'utilBed' => '82%', 'totalLayanan' => 3420], 'reports' => [['id' => 1, 'date' => date('Y-m-d'), 'title' => 'Laporan Performa UGD', 'status' => 'Final']]], 200);
     });
 });
