@@ -1,8 +1,23 @@
 <?php
-// --- 1. MATIKAN ERROR HTML AGAR TIDAK MERUSAK JSON ---
-ini_set('display_errors', '0');
+// --- 1. TANGKAP CRASH PHP DAN JADIKAN JSON ---
+ini_set('display_errors', '0'); // Sembunyikan HTML
+register_shutdown_function(function() {
+    $error = error_get_last();
+    // Jika ada error fatal (syntax error, missing file, dll)
+    if ($error && in_array($error['type'], [E_ERROR, E_CORE_ERROR, E_COMPILE_ERROR, E_PARSE])) {
+        http_response_code(500);
+        header('Content-Type: application/json');
+        echo json_encode([
+            'success' => false,
+            'message' => 'PHP Fatal Error: ' . $error['message'],
+            'file' => $error['file'],
+            'line' => $error['line']
+        ]);
+        exit;
+    }
+});
 
-// --- 2. VERCEL CORS & PREFLIGHT FIX ---
+// --- 2. VERCEL CORS FIX ---
 if (isset($_SERVER['HTTP_ORIGIN'])) {
     header("Access-Control-Allow-Origin: {$_SERVER['HTTP_ORIGIN']}");
     header('Access-Control-Allow-Credentials: true');
@@ -30,31 +45,15 @@ if (!isset($_SERVER['HTTP_AUTHORIZATION'])) {
     }
 }
 
-// --- 4. FIX LARAVEL ROUTE STRIPPING (Trik agar Laravel tidak membuang /api) ---
-$_SERVER['SCRIPT_NAME'] = '/index.php';
-
-// --- 5. VERCEL SERVERLESS CACHE FIX ---
-$tmpDirs = [
-    '/tmp/storage/framework/views',
-    '/tmp/storage/framework/cache/data',
-    '/tmp/storage/framework/sessions',
-    '/tmp/storage/logs',
-    '/tmp/bootstrap/cache'
-];
-foreach ($tmpDirs as $dir) {
-    if (!is_dir($dir)) {
-        mkdir($dir, 0777, true);
-    }
+// --- 4. VERCEL SERVERLESS CACHE FIX ---
+$storagePath = '/tmp/storage';
+if (!is_dir($storagePath . '/framework/views')) {
+    mkdir($storagePath . '/framework/views', 0777, true);
 }
+putenv("APP_SERVICES_CACHE=/tmp/services.php");
+putenv("APP_PACKAGES_CACHE=/tmp/packages.php");
+putenv("VIEW_COMPILED_PATH=$storagePath/framework/views");
 
-$_ENV['APP_SERVICES_CACHE'] = '/tmp/bootstrap/cache/services.php';
-$_ENV['APP_PACKAGES_CACHE'] = '/tmp/bootstrap/cache/packages.php';
-$_ENV['APP_CONFIG_CACHE'] = '/tmp/bootstrap/cache/config.php';
-$_ENV['APP_ROUTES_CACHE'] = '/tmp/bootstrap/cache/routes.php';
-$_ENV['APP_EVENTS_CACHE'] = '/tmp/bootstrap/cache/events.php';
-$_ENV['VIEW_COMPILED_PATH'] = '/tmp/storage/framework/views';
-$_ENV['SESSION_DRIVER'] = 'array'; // Cegah nulis file session
-$_ENV['LOG_CHANNEL'] = 'stderr';   // Arahkan log ke Vercel
-
-// --- 6. JALANKAN LARAVEL ---
+// HAPUS TRIK LAMA YANG BIKIN CRASH (SCRIPT_NAME)
+// --- 5. JALANKAN LARAVEL ---
 require __DIR__ . '/../public/index.php';
