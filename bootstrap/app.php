@@ -3,6 +3,8 @@
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Request;
+use Throwable;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -12,16 +14,18 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
-        // 1. Posisikan CORS di paling depan
         $middleware->prepend(\App\Http\Middleware\Cors::class);
-        
-        // 2. MATIKAN SATPAM CSRF UNTUK API (Solusi Error 419)
-        $middleware->validateCsrfTokens(except: [
-            'api/*',
-            'api/token',
-            '*' // Opsi nuklir: abaikan CSRF sepenuhnya jika backend hanya untuk API
-        ]);
+        $middleware->validateCsrfTokens(except: ['api/*', 'api/token', '*']);
     })
     ->withExceptions(function (Exceptions $exceptions) {
-        //
+        // PAKSA LARAVEL MENGIRIM ERROR ASLI KE FRONTEND (JSON)
+        $exceptions->render(function (Throwable $e, Request $request) {
+            if ($request->is('api/*')) {
+                return response()->json([
+                    'PESAN_ERROR_ASLI' => $e->getMessage(),
+                    'FILE_YANG_RUSAK' => $e->getFile(),
+                    'BARIS' => $e->getLine()
+                ], 500);
+            }
+        });
     })->create();
