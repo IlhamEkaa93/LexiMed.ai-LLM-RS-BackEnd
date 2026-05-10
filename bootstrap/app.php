@@ -14,11 +14,10 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
-        $middleware->prepend(\App\Http\Middleware\Cors::class);
-        $middleware->validateCsrfTokens(except: ['api/*', 'api/token', '*']);
+        // MATIKAN MIDDLEWARE CORS LARAVEL SECARA TOTAL
+        $middleware->validateCsrfTokens(except: ['api/*', '*']);
     })
     ->withExceptions(function (Exceptions $exceptions) {
-        // PAKSA LARAVEL MENGIRIM ERROR ASLI KE FRONTEND (JSON)
         $exceptions->render(function (Throwable $e, Request $request) {
             if ($request->is('api/*')) {
                 return response()->json([

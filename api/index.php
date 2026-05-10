@@ -1,11 +1,18 @@
 <?php
-// SERVERLESS CACHE FIX
-$tmp = ['/tmp/storage/framework/views', '/tmp/storage/framework/cache', '/tmp/storage/framework/sessions', '/tmp/bootstrap/cache'];
-foreach ($tmp as $dir) { if (!is_dir($dir)) { mkdir($dir, 0777, true); } }
+// Balas request preflight browser dengan cepat
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit(0);
+}
 
-putenv("APP_SERVICES_CACHE=/tmp/bootstrap/cache/services.php");
-putenv("APP_PACKAGES_CACHE=/tmp/bootstrap/cache/packages.php");
-putenv("VIEW_COMPILED_PATH=/tmp/storage/framework/views");
+// Serverless Cache Fix
+$storagePath = '/tmp/storage';
+if (!is_dir($storagePath . '/framework/views')) {
+    mkdir($storagePath . '/framework/views', 0777, true);
+}
+putenv("APP_SERVICES_CACHE=/tmp/services.php");
+putenv("APP_PACKAGES_CACHE=/tmp/packages.php");
+putenv("VIEW_COMPILED_PATH=$storagePath/framework/views");
 
-// JALANKAN LARAVEL
+// Jalankan Laravel
 require __DIR__ . '/../public/index.php';
