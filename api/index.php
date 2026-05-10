@@ -1,28 +1,35 @@
 <?php
-// ALAT RONTGEN (DIAGNOSTIK VERCEL)
-if (isset($_SERVER['REQUEST_URI']) && strpos($_SERVER['REQUEST_URI'], '/api/cek-sistem') !== false) {
-    header('Access-Control-Allow-Origin: *');
-    header('Content-Type: application/json');
-    echo json_encode([
-        '1_STATUS' => 'Pengecekan Environment Variables Vercel',
-        '2_APP_KEY' => getenv('APP_KEY') ? '? AMAN (Terisi)' : '? KOSONG! (Ini penyebab utama Error 500)',
-        '3_DB_HOST' => getenv('DB_HOST') ? '? AMAN (Terisi)' : '? KOSONG! (Database mati)',
-        '4_DB_PASSWORD' => getenv('DB_PASSWORD') ? '? AMAN (Terisi)' : '? KOSONG!',
-        '5_SOLUSI' => 'Jika ada yang silang merah (?), tambahkan di Vercel -> Settings -> Environment Variables, lalu wajib REDEPLOY!'
-    ], JSON_PRETTY_PRINT);
-    exit;
+// --- VERCEL SERVERLESS FIX ---
+// Vercel itu Read-Only. Kita paksa Laravel nulis cache di RAM (/tmp)
+$tmpCache = '/tmp/laravel/cache';
+$tmpStorage = '/tmp/laravel/storage';
+
+// Buat foldernya kalau belum ada di memori Vercel
+if (!is_dir($tmpCache)) {
+    mkdir($tmpCache, 0777, true);
+}
+if (!is_dir($tmpStorage . '/framework/views')) {
+    mkdir($tmpStorage . '/framework/views', 0777, true);
 }
 
+// Beritahu Laravel alamat rumah barunya
+putenv("APP_SERVICES_CACHE={$tmpCache}/services.php");
+putenv("APP_PACKAGES_CACHE={$tmpCache}/packages.php");
+putenv("APP_CONFIG_CACHE={$tmpCache}/config.php");
+putenv("APP_ROUTES_CACHE={$tmpCache}/routes.php");
+putenv("APP_EVENTS_CACHE={$tmpCache}/events.php");
+putenv("VIEW_COMPILED_PATH={$tmpStorage}/framework/views");
+
 try {
-    // Jalankan Mesin Laravel Normal
+    // Jalankan Mesin Laravel
     require __DIR__ . '/../public/index.php';
 } catch (\Throwable $e) {
     http_response_code(500);
     header('Access-Control-Allow-Origin: *');
     header('Content-Type: application/json');
     echo json_encode([
-        'PESAN_ERROR_ASLI' => $e->getMessage(),
-        'FILE' => $e->getFile() . ' (Baris ' . $e->getLine() . ')'
+        'STATUS' => 'CRASH_SETELAH_TMP',
+        'PESAN_ERROR_ASLI' => $e->getMessage()
     ]);
     exit;
 }
