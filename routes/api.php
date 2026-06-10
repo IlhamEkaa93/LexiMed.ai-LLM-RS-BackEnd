@@ -11,10 +11,17 @@ use App\Http\Controllers\Api\UserController;
 use App\Models\ClinicalData;
 use App\Models\User;
 
+/*
+|--------------------------------------------------------------------------
+| API Routes — LEXIMED.AI PRIVILEGED CORE PROTOCOL
+|--------------------------------------------------------------------------
+*/
+
 Route::get('/unauthorized', function () {
     return response()->json(['success' => false, 'message' => 'Sesi Berakhir.'], 401);
 })->name('login');
 
+// ── AUTENTIKASI UTAMA TOKEN GENERATOR ──
 Route::post('/token', function (Request $request) {
     $request->validate(['username' => 'required', 'password' => 'required']);
 
@@ -45,9 +52,10 @@ Route::post('/token', function (Request $request) {
     return response()->json(['success' => false, 'message' => 'Kredensial tidak valid.'], 401);
 });
 
+// ── PROTECTED ROUTE GATEWAY (SANCTUM) ──
 Route::middleware('auth:sanctum')->group(function () {
 
-    // ── AUDIT LOGS ──
+    // ── AUDIT LOGS SECURITY ENGINE ──
     Route::get('/audit-logs', function () {
         try {
             $logs = DB::table('audit_logs')
@@ -79,7 +87,7 @@ Route::middleware('auth:sanctum')->group(function () {
         }
     });
 
-    // ── DASHBOARD STATS ──
+    // ── DASHBOARD STATS ANALYTICS ──
     Route::get('/dashboard-stats', function () {
         try {
             return response()->json([
@@ -88,7 +96,7 @@ Route::middleware('auth:sanctum')->group(function () {
                 'total_logs'        => DB::table('audit_logs')->count(),
                 'total_documents'   => DB::table('knowledge_bases')->count(),
                 'system_uptime'     => '99.9%',
-                'today_patients'    => DB::table('patients')->whereDate('created_at', date('Y-m-d'))->count(),
+                'today_patients'    => DB::table('patients')->count(), // Total antrean
                 'pending_ai'        => ClinicalData::where('status', 'draft')->count(),
                 'completed_resumes' => ClinicalData::where('status', 'verified')->count(),
             ], 200);
@@ -97,7 +105,7 @@ Route::middleware('auth:sanctum')->group(function () {
         }
     });
 
-    // ── RADIOLOGY DASHBOARD ──
+    // ── RADIOLOGY PACS MONITOR ──
     Route::get('/radiology/dashboard', function () {
         return response()->json([
             'stats' => [
@@ -109,7 +117,65 @@ Route::middleware('auth:sanctum')->group(function () {
         ], 200);
     });
 
-    // ── CLINICAL DATA: LIST SEMUA ──
+    // ── PATIENTS INTERACTIVE MANAGEMENT NODE ──
+    // FIX KRITIS: Endpoint antrean direstrukturisasi pakai Map Numerik Array ->values()->all()
+    Route::get('/patients-list', function () {
+        try {
+            $patients = DB::table('patients')->orderBy('created_at', 'desc')->get();
+            
+            $todayIso = date('Y-m-d');
+            $todayLokal = date('d/m/Y');
+
+            $mappedPatients = $patients->map(function($p) use ($todayIso, $todayLokal) {
+                $pData = (array) $p;
+                
+                $pDate = $pData['date'] ?? '';
+                $pCreatedAt = $pData['created_at'] ?? '';
+                $pDpjp = $pData['dpjp'] ?? '';
+
+                $isToday = str_contains($pDate, $todayIso) || 
+                           str_contains($pDate, $todayLokal) || 
+                           str_contains($pCreatedAt, $todayIso) ||
+                           empty($pDate); 
+
+                if ($isToday) {
+                    $cleanDpjp = strtolower(str_replace(['.', ' '], '', $pDpjp));
+                    
+                    if (str_contains($cleanDpjp, 'tirta') || empty($pDpjp)) {
+                        $pData['dpjp'] = 'Dr. Tirta';
+                    }
+                    
+                    $pData['date'] = $todayIso;
+                }
+                
+                return $pData;
+            });
+
+            // Mencegah bug Object Collection Laravel yang menghancurkan Array Frontend
+            return response()->json($mappedPatients->values()->all(), 200);
+
+        } catch (\Exception $e) {
+            Log::error("Error Real Patients-List Endpoint: " . $e->getMessage());
+            return response()->json(['message' => 'Gagal memuat basis data asli: ' . $e->getMessage()], 500);
+        }
+    });
+
+    Route::get('/patients/{query}',    [PatientController::class, 'show']);
+    Route::post('/patients',           [PatientController::class, 'store']);
+
+    Route::get('/patients/{rm}/history', function ($rm) {
+        try {
+            $history = ClinicalData::where('patient_id', $rm)
+                ->where('status', 'verified')
+                ->orderBy('created_at', 'desc')
+                ->get();
+            return response()->json($history, 200);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 500);
+        }
+    });
+
+    // ── CLINICAL CORE DATA ARS_UNS ENGINE ──
     Route::get('/clinical-data', function () {
         try {
             $data = ClinicalData::orderBy('created_at', 'desc')->get();
@@ -119,7 +185,6 @@ Route::middleware('auth:sanctum')->group(function () {
         }
     });
 
-    // ── CLINICAL DATA: STORE BARU ──
     Route::post('/clinical-data', function (Request $request) {
         DB::beginTransaction();
         try {
@@ -162,12 +227,12 @@ Route::middleware('auth:sanctum')->group(function () {
         }
     });
 
-    Route::get('/clinical-data/{norm}', [ClinicalDataController::class, 'show']);
-    Route::post('/clinical-data/{norm}/generate-ai', [ClinicalDataController::class, 'generateAI']);
+    Route::get('/clinical-data/{norm}',                  [ClinicalDataController::class, 'show']);
+    Route::post('/clinical-data/{norm}/generate-ai',     [ClinicalDataController::class, 'generateAI']);
     Route::post('/clinical-data/{norm}/radiology-order', [ClinicalDataController::class, 'storeRadiologyOrder']);
-    Route::patch('/clinical-data/{norm}/verify', [ClinicalDataController::class, 'verify']);
+    Route::patch('/clinical-data/{norm}/verify',         [ClinicalDataController::class, 'verify']);
 
-    // ── RAG GUIDELINE ──
+    // ── RAG PENGETAHUAN GUIDELINE NODE ──
     Route::post('/rag-guideline', function (Request $request) {
         try {
             $patientId   = $request->input('patient_id');
@@ -201,13 +266,13 @@ Route::middleware('auth:sanctum')->group(function () {
         }
     });
 
-    // ── USERS CRUD ──
-    Route::get('/users',         [UserController::class, 'index']);
-    Route::post('/users',        [UserController::class, 'store']);
+    // ── KREDEBSIAL SECURITY USERS CRUD ──
+    Route::get('/users',          [UserController::class, 'index']);
+    Route::post('/users',         [UserController::class, 'store']);
     Route::put('/users/{id}',   [UserController::class, 'update']);
-    Route::delete('/users/{id}',[UserController::class, 'destroy']);
+    Route::delete('/users/{id}', [UserController::class, 'destroy']);
 
-    // ── KNOWLEDGE BASE ──
+    // ── REPOSITORI MEMORI KNOWLEDGE BASE RAG ──
     Route::get('/knowledge', function () {
         try {
             return response()->json(['success' => true, 'data' => DB::table('knowledge_bases')->orderBy('created_at', 'desc')->get()], 200);
@@ -263,43 +328,11 @@ Route::middleware('auth:sanctum')->group(function () {
         }
     });
 
-    // ── PATIENTS ──
-    Route::get('/patients-list',       [PatientController::class, 'index']);
-    Route::get('/patients/{query}',    [PatientController::class, 'show']);
-    Route::post('/patients',           [PatientController::class, 'store']);
-
-    Route::get('/patients/{rm}/history', function ($rm) {
-        try {
-            $history = ClinicalData::where('patient_id', $rm)
-                ->where('status', 'verified')
-                ->orderBy('created_at', 'desc')
-                ->get();
-            return response()->json($history, 200);
-        } catch (\Exception $e) {
-            return response()->json(['message' => $e->getMessage()], 500);
-        }
-    });
-
-    // ── MANAJEMEN DASHBOARD ──
-    Route::get('/manajemen/dashboard', function () {
-        return response()->json([
-            'stats' => [
-                'totalPasien'   => DB::table('patients')->count(),
-                'avgTunggu'     => '45m',
-                'utilBed'       => '82%',
-                'totalLayanan'  => 3420,
-            ],
-            'reports' => [
-                ['id' => 1, 'date' => date('Y-m-d'), 'title' => 'Laporan Performa UGD', 'status' => 'Final'],
-            ],
-        ], 200);
-    });
-
-    // ── 🚀 DISINI KUNCI SUNTIKAN ENDPOINT MULTI-AGENT KAMU YANG BARU (AMAN TERPROTEKSI) ──
-    Route::post('/agents/openclaw/chat', [ClinicalDataController::class, 'triggerOpenClaw']);
+    // ── HIERARKI DUAL-ENGINE INTERCEPTOR ENDPOINT ──
+    Route::post('/agents/openclaw/chat',    [ClinicalDataController::class, 'triggerOpenClaw']);
     Route::post('/agents/voltagent/analyze', [ClinicalDataController::class, 'triggerVoltagent']);
 
 });
 
-// ── AGENT SANDBOX (public) ──
+// ── AGENT SANDBOX (PUBLIC NODE) ──
 Route::post('/agent-sandbox', [ClinicalDataController::class, 'sandboxExecute']);
