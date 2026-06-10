@@ -16,8 +16,8 @@ use App\Models\User;
 | API Routes — LEXIMED.AI PRIVILEGED CORE PROTOCOL
 |--------------------------------------------------------------------------
 |
-| v6.4 - DYNAMIC RETROACTIVE DATA CENTRALIZATION FIXED
-| Memisahkan antrean harian dokter dengan master log admin berbasis jangkauan kalender riil
+| Engine rute utama terintegrasi murni database cloud Supabase.
+| v6.5 - FIXED CHANNELS (SINKRONISASI TOTAL ENGINES LINTAS WORKSTATION)
 |
 */
 
@@ -217,8 +217,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // ── 🚀 FIX MUTLAK: ENDPOINT MASTER DATA TOTAL UNTUK NODE ADMIN LINTAS MINGGU ──
     Route::get('/patients-master', function () {
         try {
-            // Mengambil seluruh master data pasien tanpa filter tanggal harian agar data historis uji coba tidak hilang
-            $patients = DB::table('patients')->orderBy('created_at', 'desc')->get();
+            $patients = DB::table('patients')->orderBy('updated_at', 'desc')->get();
             return response()->json(['success' => true, 'data' => $patients], 200);
         } catch (\Throwable $e) {
             return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
@@ -230,10 +229,11 @@ Route::middleware('auth:sanctum')->group(function () {
         try {
             $todayIso = date('Y-m-d');
 
+            // Narasi query riil Supabase mengecek created_at harian ATAU kolom date baru hasil mutasi
             $patients = DB::table('patients')
                 ->whereDate('created_at', $todayIso)
                 ->orWhere('date', $todayIso)
-                ->orderBy('created_at', 'desc')
+                ->orderBy('updated_at', 'desc') // Urutkan berbasis detik perubahan teranyar
                 ->get();
 
             $mappedPatients = $patients->map(function($p) use ($todayIso) {
@@ -341,5 +341,5 @@ Route::middleware('auth:sanctum')->group(function () {
 
 });
 
-// ── AGENT SANDBOX (PUBLIC NODE) ──
+// ── AGENT SANDBOX (public) ──
 Route::post('/agent-sandbox', [ClinicalDataController::class, 'sandboxExecute']);

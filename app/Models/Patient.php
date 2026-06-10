@@ -10,12 +10,12 @@ class Patient extends Model
     use HasFactory;
 
     /**
-     * Nama tabel di database PostgreSQL
+     * Nama tabel di database PostgreSQL Supabase
      */
     protected $table = 'patients';
 
     /**
-     * Karena no_rm adalah string dan Primary Key, 
+     * Karena no_rm adalah string dan bertindak sebagai Primary Key, 
      * kita harus set incrementing ke false.
      */
     protected $primaryKey = 'no_rm';
@@ -24,21 +24,22 @@ class Patient extends Model
 
     /**
      * Kolom yang boleh diisi (Mass Assignment)
-     * Harus sinkron dengan file Migration yang baru kamu jalankan.
+     * FIX: Wajib menambahkan 'date' agar nilai parameter penanggalan tidak dibuang Laravel!
      */
     protected $fillable = [
         'no_rm',
-        'title',  // An, Ny, Tn, Nona
+        'title',  
         'name',
         'age',
-        'gender', // Laki-Laki / Perempuan
+        'gender', 
         'unit',
         'dpjp',
-        'status_treatment'
+        'status_treatment',
+        'date' // 🚀 SUNTIK DISINI AGAR LEGAL DISIMPAN KE SUPABASE
     ];
 
     /**
-     * Casting tipe data
+     * Casting tipe data otomatis saat dikirim ke frontend
      */
     protected $casts = [
         'age' => 'integer',

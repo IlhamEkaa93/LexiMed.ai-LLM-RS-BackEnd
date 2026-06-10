@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Patient; // Pastikan Model Patient sudah dibuat
+use App\Models\Patient; 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
@@ -11,7 +11,6 @@ class PatientController extends Controller
 {
     /**
      * Menampilkan semua daftar pasien.
-     * Digunakan oleh Admin untuk melihat list pasien di PostgreSQL.
      */
     public function index()
     {
@@ -31,33 +30,34 @@ class PatientController extends Controller
     }
 
     /**
-     * Menyimpan data pasien baru atau update jika NORM sudah ada.
-     * Mendukung kolom title (Tn, Ny, An, Nona).
+     * Menyimpan data pasien baru atau update kunjungan berobat ulang.
      */
     public function store(Request $request)
     {
-        // 1. Validasi Input sesuai skema database terbaru
+        // 1. Validasi Input - Kolom date dimasukkan secara ketat ke sirkuit pengaman Laravel
         $validated = $request->validate([
             'no_rm'            => 'required|string',
-            'title'            => 'nullable|string', // Contoh: Tn, Ny, An
+            'title'            => 'nullable|string', 
             'name'             => 'required|string',
             'age'              => 'required|integer',
-            'gender'           => 'required|string', // Laki-Laki atau Perempuan
+            'gender'           => 'required|string', 
             'unit'             => 'required|string',
             'dpjp'             => 'required|string',
             'status_treatment' => 'required|string',
+            'date'             => 'nullable|string', // 🚀 FIX: Diizinkan masuk mass assignment
         ]);
 
         try {
-            /**
-             * 2. Simpan menggunakan updateOrCreate.
-             * Jika no_rm sudah ada di PostgreSQL, data akan diperbarui.
-             * Jika belum ada, data akan dibuat baru (Insert).
-             */
+            // 2. Eksekusi update atau create berdasarkan kecocokan nomor rekam medis
             $patient = Patient::updateOrCreate(
                 ['no_rm' => $validated['no_rm']], 
                 $validated
             );
+
+            // 🚀 FIX MUTLAK JURI PREPARATION: 
+            // Jika pasien melakukan "Berobat Ulang", paksa baris updated_at mencatat waktu detik ini
+            // agar antrean di dasbor dokter otomatis melesat naik ke posisi paling atas!
+            $patient->touch(); 
 
             return response()->json([
                 'success' => true,
@@ -66,7 +66,7 @@ class PatientController extends Controller
             ], 201);
 
         } catch (\Exception $e) {
-            Log::error("Gagal registrasi pasien: " . $e->getMessage());
+            Log::error("Gagal registrasi pasien master: " . $e->getMessage());
             
             return response()->json([
                 'success' => false,
@@ -77,11 +77,9 @@ class PatientController extends Controller
 
     /**
      * Menampilkan detail satu pasien berdasarkan NORM.
-     * Fungsi ini dipanggil oleh Dokter dan Asisten.
      */
     public function show($rm)
     {
-        // Cari berdasarkan Primary Key (no_rm)
         $patient = Patient::where('no_rm', $rm)->first();
         
         if (!$patient) {
