@@ -58,7 +58,7 @@ class ClinicalDataController extends Controller
     }
 
     /**
-     * 2. STORE: Input data rekam medis awal oleh dokter poliklinik.
+     * 2. STORE: Input data rekam medis awal oleh dokter poliklinik atau asisten node.
      */
     public function store(Request $request)
     {
@@ -73,6 +73,9 @@ class ClinicalDataController extends Controller
         ]);
 
         try {
+            // FIX INTEGRASI: Menyertakan tanggal hari ini (Y-m-d) ke kolom date baru hasil migrasi siber
+            $todayIso = date('Y-m-d');
+
             $data = ClinicalData::create([
                 'patient_id'        => $validated['patient_id'],
                 'blood_pressure'    => $request->blood_pressure ?? '---/--',
@@ -80,6 +83,7 @@ class ClinicalDataController extends Controller
                 'temperature'       => $request->temperature ?? '--',
                 'oxygen_saturation' => $request->oxygen_saturation ?? '--',
                 'raw_content'       => $validated['raw_content'],
+                'date'              => $todayIso, // 🚀 SUNTIK TANGGAL NATIVE UNTUK KALIBRASI ANTARCHANNEL
                 'status'            => 'draft',
             ]);
 
@@ -94,14 +98,13 @@ class ClinicalDataController extends Controller
 
             return response()->json(['success' => true, 'data' => ClinicalData::find($data->id)], 201);
         } catch (\Exception $e) {
-            Log::error("Gagal simpan ClinicalData: " . $e->getMessage());
+            Log::error("Gagal simpan ClinicalData Master Model: " . $e->getMessage());
             return response()->json(['success' => false, 'error' => $e->getMessage()], 500);
         }
     }
 
     /**
      * 3. GENERATE AI: Orkestrasi Dual-Engine Berantai (OpenClaw Gateway -> Voltagent Refiner)
-     * Memenuhi 100% spesifikasi fungsional arsitektur yang tertera pada proposal kompetisi Olivia.
      */
     public function generateAI($norm, Request $request)
     {
@@ -111,7 +114,6 @@ class ClinicalDataController extends Controller
             $rawText = $request->raw_text;
             $customPrompt = $request->custom_prompt ?? 'Analisis catatan medis ini.';
 
-            // Jalur absolut menuju skrip OpenClaw Gateway dan Voltagent Downstream
             $openClawPath = app_path('Agents/OpenClaw/openclaw_gateway.py');
             $voltaPath    = app_path('Agents/Voltagent/main.py');
 
@@ -125,7 +127,6 @@ class ClinicalDataController extends Controller
                 throw new \Exception("OpenClaw Secure Gateway Node Error: " . $openClawProcess->getErrorOutput());
             }
 
-            // Ambil luaran JSON validasi klinis dari OpenClaw Gateway
             $gatewayResultJson = trim($openClawProcess->getOutput());
 
             // --- STEP 2: PROSES TRANSFER PAYLOAD KE VOLTAGENT REFINER ---
@@ -135,7 +136,6 @@ class ClinicalDataController extends Controller
             $voltaProcess->run();
 
             if ($voltaProcess->isSuccessful()) {
-                // Ambil hasil akhir teks medis terformat murni buatan Voltagent
                 $aiResult = trim($voltaProcess->getOutput());
 
                 $clinicalData = ClinicalData::where('patient_id', $norm)->latest()->first();
@@ -152,7 +152,6 @@ class ClinicalDataController extends Controller
             Log::error("Hybrid AI Pipeline Failure: " . $e->getMessage());
             
             // AUTOMATIC FAILOVER BACKUP JALUR AMAN: Direct API Llama 3.3 Groq Cloud
-            // Menjamin kelancaran simulasi demo aplikasi jika runtime lokal Python bermasalah
             return $this->generateAIFallbackDirect($norm, $request);
         }
     }
@@ -211,9 +210,9 @@ class ClinicalDataController extends Controller
 
             if ($response->successful()) {
                 return response()->json([
-                    'status'           => 'success',
-                    'active_agent'     => $request->role,
-                    'pipeline_output'  => ['content' => $response->json('choices.0.message.content')],
+                    'status'          => 'success',
+                    'active_agent'    => $request->role,
+                    'pipeline_output' => ['content' => $response->json('choices.0.message.content')],
                 ], 200);
             }
 
@@ -231,6 +230,7 @@ class ClinicalDataController extends Controller
         $request->validate(['radiology_modality' => 'required|string', 'catatan_rujukan' => 'nullable|string']);
 
         try {
+            $todayIso = date('Y-m-d');
             $clinicalData = ClinicalData::where('patient_id', $norm)->latest()->first();
 
             if (!$clinicalData) {
@@ -241,6 +241,7 @@ class ClinicalDataController extends Controller
                     'radiology_kesan'    => null,
                     'radiology_image'    => null,
                     'radiology_doctor'   => null,
+                    'date'               => $todayIso,
                     'source'             => 'manual',
                     'status'             => 'draft',
                     'created_at'         => now(),
@@ -252,6 +253,7 @@ class ClinicalDataController extends Controller
                     'radiology_kesan'    => null,
                     'radiology_image'    => null,
                     'radiology_doctor'   => null,
+                    'date'               => $todayIso,
                 ]);
             }
 
@@ -271,7 +273,7 @@ class ClinicalDataController extends Controller
         if ($user) {
             return (int) $user->id;
         }
-        return 1; // fallback: ID admin default
+        return 1; // fallback: ID admin/staff default
     }
 
     /**
@@ -281,17 +283,18 @@ class ClinicalDataController extends Controller
     {
         DB::beginTransaction();
         try {
+            $todayIso = date('Y-m-d');
             $lastDraft = ClinicalData::where('patient_id', $norm)->latest()->first();
             $isRadiologPath = $request->has('radiology_kesan') || $request->has('base64_image');
             $savedImagePath = $lastDraft?->radiology_image;
 
             if ($request->filled('base64_image')) {
                 $base64Data  = $request->base64_image;
-                $mime        = $request->input('image_mime', 'image/jpeg');
-                $extension   = ($mime === 'image/png') ? 'png' : 'jpg';
+                $mime = $request->input('image_mime', 'image/jpeg');
+                $extension = ($mime === 'image/png') ? 'png' : 'jpg';
 
                 $imageDecoded = base64_decode($base64Data);
-                $fileName     = time() . '_pacs_' . $norm . '.' . $extension;
+                $fileName = time() . '_pacs_' . $norm . '.' . $extension;
 
                 $publicPath = public_path('storage/radiology/');
                 if (!file_exists($publicPath)) {
@@ -315,6 +318,7 @@ class ClinicalDataController extends Controller
                     'radiology_kesan'    => $request->input('radiology_kesan'),
                     'radiology_doctor'   => $request->input('radiology_doctor', 'Dr. Radiolog'),
                     'radiology_image'    => $savedImagePath,
+                    'date'               => $todayIso, // 🚀 LOCK TANGGAL VALIDASI PAC
                     'status'             => 'verified',
                     'created_at'         => now(),
                     'updated_at'         => now(),
@@ -332,6 +336,7 @@ class ClinicalDataController extends Controller
                     'radiology_kesan'    => $lastDraft?->radiology_kesan ?? null,
                     'radiology_doctor'   => $lastDraft?->radiology_doctor ?? null,
                     'radiology_image'    => $lastDraft?->radiology_image ?? null,
+                    'date'               => $todayIso, // 🚀 LOCK TANGGAL VALIDASI RME DOKTER
                     'status'             => 'verified',
                     'created_at'         => now(),
                     'updated_at'         => now(),
@@ -345,6 +350,14 @@ class ClinicalDataController extends Controller
                 'user_id'     => $safeUserId,
                 'action'      => $isRadiologPath ? 'RADIOLOGY_PACS_UPLOAD' : 'DOCTOR_VERIFY',
                 'description' => ($isRadiologPath ? 'Radiolog memverifikasi citra PACS' : 'Dokter memvalidasi rekam medis') . " untuk No. RM: {$norm}",
+                'created_at'  => now(),
+                'updated_at'  => now(),
+            ]);
+
+            DB::table('audit_logs')->insert([
+                'user_id'     => $safeUserId,
+                'action'      => 'TIMELINE_SYNCHRONIZATION',
+                'description' => "Sinkronisasi sirkuit biner lini masa untuk No. RM: {$norm} selesai.",
                 'created_at'  => now(),
                 'updated_at'  => now(),
             ]);
