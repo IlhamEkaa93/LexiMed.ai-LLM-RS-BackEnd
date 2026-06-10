@@ -90,13 +90,14 @@ Route::middleware('auth:sanctum')->group(function () {
     // ── DASHBOARD STATS ANALYTICS ──
     Route::get('/dashboard-stats', function () {
         try {
+            $todayDate = date('Y-m-d');
             return response()->json([
                 'success'           => true,
                 'total_staff'       => DB::table('users')->count(),
                 'total_logs'        => DB::table('audit_logs')->count(),
                 'total_documents'   => DB::table('knowledge_bases')->count(),
                 'system_uptime'     => '99.9%',
-                'today_patients'    => DB::table('patients')->count(), // Total antrean
+                'today_patients'    => DB::table('patients')->whereDate('created_at', $todayDate)->orWhere('date', $todayDate)->count(), 
                 'pending_ai'        => ClinicalData::where('status', 'draft')->count(),
                 'completed_resumes' => ClinicalData::where('status', 'verified')->count(),
             ], 200);
@@ -117,46 +118,43 @@ Route::middleware('auth:sanctum')->group(function () {
         ], 200);
     });
 
-    // ── PATIENTS INTERACTIVE MANAGEMENT NODE ──
-    // FIX KRITIS: Endpoint antrean direstrukturisasi pakai Map Numerik Array ->values()->all()
+    // ── PATIENTS INTERACTIVE LIVE QUEUE NODE (PURE REAL TIME DATABASE FIX) ──
     Route::get('/patients-list', function () {
         try {
-            $patients = DB::table('patients')->orderBy('created_at', 'desc')->get();
-            
+            // Ambil string penanggalan hari ini berbasis server medis Indonesia
             $todayIso = date('Y-m-d');
             $todayLokal = date('d/m/Y');
 
-            $mappedPatients = $patients->map(function($p) use ($todayIso, $todayLokal) {
+            // Ambil data asli yang didaftarkan hari ini dari database PostgreSQL Supabase
+            // Menggunakan klausa SQL whereDate guna memotong ambigitas timestamp jam biner
+            $patients = DB::table('patients')
+                ->whereDate('created_at', $todayIso)
+                ->orWhere('date', $todayIso)
+                ->orWhere('date', $todayLokal)
+                ->orderBy('id', 'desc')
+                ->get();
+
+            $mappedPatients = $patients->map(function($p) use ($todayIso) {
                 $pData = (array) $p;
+                $pDpjp = isset($pData['dpjp']) ? (string)$pData['dpjp'] : '';
+
+                // Bersihkan string penanda DPJP Dokter demi sinkronisasi state React Frontend
+                $cleanDpjp = strtolower(str_replace(['.', ' '], '', $pDpjp));
                 
-                $pDate = $pData['date'] ?? '';
-                $pCreatedAt = $pData['created_at'] ?? '';
-                $pDpjp = $pData['dpjp'] ?? '';
-
-                $isToday = str_contains($pDate, $todayIso) || 
-                           str_contains($pDate, $todayLokal) || 
-                           str_contains($pCreatedAt, $todayIso) ||
-                           empty($pDate); 
-
-                if ($isToday) {
-                    $cleanDpjp = strtolower(str_replace(['.', ' '], '', $pDpjp));
-                    
-                    if (str_contains($cleanDpjp, 'tirta') || empty($pDpjp)) {
-                        $pData['dpjp'] = 'Dr. Tirta';
-                    }
-                    
-                    $pData['date'] = $todayIso;
+                if (str_contains($cleanDpjp, 'tirta') || empty($pDpjp)) {
+                    $pData['dpjp'] = 'Dr. Tirta';
                 }
+                
+                // Seragamkan parameter mutlak kolom date ke ISO format untuk React component
+                $pData['date'] = $todayIso;
                 
                 return $pData;
             });
 
-            // Mencegah bug Object Collection Laravel yang menghancurkan Array Frontend
-            return response()->json($mappedPatients->values()->all(), 200);
-
+            return response()->json($mappedPatients->values()->toArray(), 200);
         } catch (\Exception $e) {
-            Log::error("Error Real Patients-List Endpoint: " . $e->getMessage());
-            return response()->json(['message' => 'Gagal memuat basis data asli: ' . $e->getMessage()], 500);
+            Log::error("Error Severe Patients-List Server Side: " . $e->getMessage());
+            return response()->json(['success' => false, 'message' => 'Gagal memuat basis data asli harian: ' . $e->getMessage()], 500);
         }
     });
 
@@ -266,7 +264,7 @@ Route::middleware('auth:sanctum')->group(function () {
         }
     });
 
-    // ── KREDEBSIAL SECURITY USERS CRUD ──
+    // ── KREDENSIAL SECURITY USERS CRUD ──
     Route::get('/users',          [UserController::class, 'index']);
     Route::post('/users',         [UserController::class, 'store']);
     Route::put('/users/{id}',   [UserController::class, 'update']);
@@ -324,7 +322,7 @@ Route::middleware('auth:sanctum')->group(function () {
             DB::table('knowledge_bases')->where('id', $id)->delete();
             return response()->json(['success' => true, 'message' => 'Dokumen dihapus dari Vector DB'], 200);
         } catch (\Exception $e) {
-            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+            return response()->json(['success' => false, 'message' => 'Gagal menghapus dokumen.'], 500);
         }
     });
 
