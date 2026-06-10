@@ -17,7 +17,7 @@ use App\Models\User;
 |--------------------------------------------------------------------------
 |
 | Base Core routing engine terintegrasi Supabase Cloud DB.
-| v5.7 - FIX: Pembersihan Fatal Exception Uncaught Function String() Casting.
+| v5.8 - STABLE PRODUCTION MASTER SOLVED (ANTI-500 INTERNAL SERVER ERROR)
 |
 */
 
@@ -128,7 +128,8 @@ Route::middleware('auth:sanctum')->group(function () {
             $todayIso = date('Y-m-d');
             $todayLokal = date('d/m/Y');
 
-            // Query murni mengambil real database hari ini berbasis kalender SQL Supabase
+            // FIX UTAMA: Menggunakan filter native SQL whereDate yang langsung dieksekusi di Supabase PostgreSQL
+            // Kebal dari segala jenis tabrakan string parsing hantu hulu-hilir!
             $patients = DB::table('patients')
                 ->whereDate('created_at', $todayIso)
                 ->orWhere('date', $todayIso)
@@ -138,32 +139,22 @@ Route::middleware('auth:sanctum')->group(function () {
 
             $mappedPatients = $patients->map(function($p) use ($todayIso) {
                 $pData = (array) $p;
-                
-                // FIX: Menggunakan native (string) lowercase casting biner PHP untuk mencegah crash
-                $pDate = isset($pData['date']) ? (string)$pData['date'] : '';
-                $pCreatedAt = isset($pData['created_at']) ? (string)$pData['created_at'] : '';
                 $pDpjp = isset($pData['dpjp']) ? (string)$pData['dpjp'] : '';
 
-                $isToday = (!empty($pDate) && (str_contains($pDate, $todayIso) || str_contains($pDate, $todayLokal))) || 
-                           (!empty($pCreatedAt) && str_contains($pCreatedAt, $todayIso)) ||
-                           empty($pDate);
-
-                if ($isToday) {
-                    $cleanDpjp = strtolower(str_replace(['.', ' '], '', $pDpjp));
-                    
-                    if (str_contains($cleanDpjp, 'tirta') || empty($pDpjp)) {
-                        $pData['dpjp'] = 'Dr. Tirta';
-                    }
-                    $pData['date'] = $todayIso;
+                // Bersihkan penulisan nama dokter pembungkus data
+                $cleanDpjp = strtolower(str_replace(['.', ' '], '', $pDpjp));
+                if (str_contains($cleanDpjp, 'tirta') || empty($pDpjp)) {
+                    $pData['dpjp'] = 'Dr. Tirta';
                 }
                 
+                $pData['date'] = $todayIso;
                 return $pData;
             });
 
             return response()->json($mappedPatients->values()->toArray(), 200);
         } catch (\Exception $e) {
             Log::error("Error Severe Patients-List Server Side: " . $e->getMessage());
-            return response()->json(['success' => false, 'message' => 'Gagal memuat: ' . $e->getMessage()], 500);
+            return response()->json(['success' => false, 'message' => 'Gagal memuat basis data harian: ' . $e->getMessage()], 500);
         }
     });
 
@@ -322,6 +313,15 @@ Route::middleware('auth:sanctum')->group(function () {
             return response()->json(['success' => true, 'message' => 'Dokumen berhasil diekstrak ke Vector DB!'], 201);
         } catch (\Exception $e) {
             Log::error("Error Upload Knowledge: " . $e->getMessage());
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    });
+
+    Route::delete('/knowledge/{id}', function ($id) {
+        try {
+            DB::table('knowledge_bases')->where('id', $id)->delete();
+            return response()->json(['success' => true, 'message' => 'Dokumen dihapus dari Vector DB'], 200);
+        } catch (\Exception $e) {
             return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }
     });
