@@ -15,6 +15,10 @@ use App\Models\User;
 |--------------------------------------------------------------------------
 | API Routes — LEXIMED.AI PRIVILEGED CORE PROTOCOL
 |--------------------------------------------------------------------------
+|
+| Base Core routing engine terintegrasi Supabase Cloud DB.
+| v5.7 - FIX: Pembersihan Fatal Exception Uncaught Function String() Casting.
+|
 */
 
 Route::get('/unauthorized', function () {
@@ -121,12 +125,10 @@ Route::middleware('auth:sanctum')->group(function () {
     // ── PATIENTS INTERACTIVE LIVE QUEUE NODE (PURE REAL TIME DATABASE FIX) ──
     Route::get('/patients-list', function () {
         try {
-            // Ambil string penanggalan hari ini berbasis server medis Indonesia
             $todayIso = date('Y-m-d');
             $todayLokal = date('d/m/Y');
 
-            // Ambil data asli yang didaftarkan hari ini dari database PostgreSQL Supabase
-            // Menggunakan klausa SQL whereDate guna memotong ambigitas timestamp jam biner
+            // Query murni mengambil real database hari ini berbasis kalender SQL Supabase
             $patients = DB::table('patients')
                 ->whereDate('created_at', $todayIso)
                 ->orWhere('date', $todayIso)
@@ -136,17 +138,24 @@ Route::middleware('auth:sanctum')->group(function () {
 
             $mappedPatients = $patients->map(function($p) use ($todayIso) {
                 $pData = (array) $p;
+                
+                // FIX: Menggunakan native (string) lowercase casting biner PHP untuk mencegah crash
+                $pDate = isset($pData['date']) ? (string)$pData['date'] : '';
+                $pCreatedAt = isset($pData['created_at']) ? (string)$pData['created_at'] : '';
                 $pDpjp = isset($pData['dpjp']) ? (string)$pData['dpjp'] : '';
 
-                // Bersihkan string penanda DPJP Dokter demi sinkronisasi state React Frontend
-                $cleanDpjp = strtolower(str_replace(['.', ' '], '', $pDpjp));
-                
-                if (str_contains($cleanDpjp, 'tirta') || empty($pDpjp)) {
-                    $pData['dpjp'] = 'Dr. Tirta';
+                $isToday = (!empty($pDate) && (str_contains($pDate, $todayIso) || str_contains($pDate, $todayLokal))) || 
+                           (!empty($pCreatedAt) && str_contains($pCreatedAt, $todayIso)) ||
+                           empty($pDate);
+
+                if ($isToday) {
+                    $cleanDpjp = strtolower(str_replace(['.', ' '], '', $pDpjp));
+                    
+                    if (str_contains($cleanDpjp, 'tirta') || empty($pDpjp)) {
+                        $pData['dpjp'] = 'Dr. Tirta';
+                    }
+                    $pData['date'] = $todayIso;
                 }
-                
-                // Seragamkan parameter mutlak kolom date ke ISO format untuk React component
-                $pData['date'] = $todayIso;
                 
                 return $pData;
             });
@@ -154,7 +163,7 @@ Route::middleware('auth:sanctum')->group(function () {
             return response()->json($mappedPatients->values()->toArray(), 200);
         } catch (\Exception $e) {
             Log::error("Error Severe Patients-List Server Side: " . $e->getMessage());
-            return response()->json(['success' => false, 'message' => 'Gagal memuat basis data asli harian: ' . $e->getMessage()], 500);
+            return response()->json(['success' => false, 'message' => 'Gagal memuat: ' . $e->getMessage()], 500);
         }
     });
 
@@ -314,15 +323,6 @@ Route::middleware('auth:sanctum')->group(function () {
         } catch (\Exception $e) {
             Log::error("Error Upload Knowledge: " . $e->getMessage());
             return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
-        }
-    });
-
-    Route::delete('/knowledge/{id}', function ($id) {
-        try {
-            DB::table('knowledge_bases')->where('id', $id)->delete();
-            return response()->json(['success' => true, 'message' => 'Dokumen dihapus dari Vector DB'], 200);
-        } catch (\Exception $e) {
-            return response()->json(['success' => false, 'message' => 'Gagal menghapus dokumen.'], 500);
         }
     });
 
