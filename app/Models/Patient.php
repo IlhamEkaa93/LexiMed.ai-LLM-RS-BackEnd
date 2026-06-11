@@ -24,18 +24,22 @@ class Patient extends Model
 
     /**
      * Kolom yang boleh diisi (Mass Assignment)
-     * FIX: Wajib menambahkan 'date' agar nilai parameter penanggalan tidak dibuang Laravel!
+     * FIX MUTLAK: Wajib menyuntikkan kolom 'radiology_*' agar data dari modul PACS/Dokter tidak dibuang Laravel!
      */
     protected $fillable = [
         'no_rm',
-        'title',  
+        'title', 
         'name',
         'age',
         'gender', 
         'unit',
         'dpjp',
         'status_treatment',
-        'date' // 🚀 SUNTIK DISINI AGAR LEGAL DISIMPAN KE SUPABASE
+        'date',
+        'radiology_modality', // 🚀 SUNTIK AGAR ORDER RUJUKAN DOKTER BISA MASUK
+        'radiology_image',    // 🚀 SUNTIK AGAR UNGGAH FOTO CITRA RADIOLOG BISA MASUK
+        'radiology_kesan',    // 🚀 SUNTIK AGAR HASIL EKSPERTISE AI/MANUAL BISA MASUK
+        'radiology_doctor'    // 🚀 SUNTIK AGAR NAMA DOKTER SP.RAD BISA MASUK
     ];
 
     /**
