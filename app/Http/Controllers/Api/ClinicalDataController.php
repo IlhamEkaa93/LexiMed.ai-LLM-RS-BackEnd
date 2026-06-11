@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\ClinicalData;
+use App\Models\Patient; // 🚀 INJEKSI: Panggil Model Patient agar sinkron lintas tabel
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -73,7 +74,6 @@ class ClinicalDataController extends Controller
         ]);
 
         try {
-            // FIX INTEGRASI: Menyertakan tanggal hari ini (Y-m-d) ke kolom date baru hasil migrasi siber
             $todayIso = date('Y-m-d');
 
             $data = ClinicalData::create([
@@ -83,8 +83,9 @@ class ClinicalDataController extends Controller
                 'temperature'       => $request->temperature ?? '--',
                 'oxygen_saturation' => $request->oxygen_saturation ?? '--',
                 'raw_content'       => $validated['raw_content'],
-                'date'              => $todayIso, // 🚀 SUNTIK TANGGAL NATIVE UNTUK KALIBRASI ANTARCHANNEL
+                'date'              => $todayIso, 
                 'status'            => 'draft',
+                '制造_at'           => now(),
             ]);
 
             if ($request->has('custom_prompt')) {
@@ -150,8 +151,6 @@ class ClinicalDataController extends Controller
 
         } catch (\Exception $e) {
             Log::error("Hybrid AI Pipeline Failure: " . $e->getMessage());
-            
-            // AUTOMATIC FAILOVER BACKUP JALUR AMAN: Direct API Llama 3.3 Groq Cloud
             return $this->generateAIFallbackDirect($norm, $request);
         }
     }
@@ -257,6 +256,19 @@ class ClinicalDataController extends Controller
                 ]);
             }
 
+            // 🚀 SINKRONISASI FIKS SAKTI: Update juga ke tabel Patients agar dibaca Antrean PACS harian!
+            $patient = Patient::where('no_rm', $norm)->first();
+            if ($patient) {
+                $patient->update([
+                    'radiology_modality' => $request->radiology_modality,
+                    'radiology_image'    => null, // Reset jika ada rujukan baru
+                    'radiology_kesan'    => null,
+                    'radiology_doctor'   => null
+                ]);
+                // Paksa updated_at naik ke atas antrean
+                $patient->touch();
+            }
+
             return response()->json(['success' => true, 'message' => 'Instruksi rujukan berhasil disimpan.'], 200);
         } catch (\Exception $e) {
             Log::error("Gagal storeRadiologyOrder: " . $e->getMessage());
@@ -273,7 +285,7 @@ class ClinicalDataController extends Controller
         if ($user) {
             return (int) $user->id;
         }
-        return 1; // fallback: ID admin/staff default
+        return 1;
     }
 
     /**
@@ -318,11 +330,21 @@ class ClinicalDataController extends Controller
                     'radiology_kesan'    => $request->input('radiology_kesan'),
                     'radiology_doctor'   => $request->input('radiology_doctor', 'Dr. Radiolog'),
                     'radiology_image'    => $savedImagePath,
-                    'date'               => $todayIso, // 🚀 LOCK TANGGAL VALIDASI PAC
+                    'date'               => $todayIso, 
                     'status'             => 'verified',
                     'created_at'         => now(),
                     'updated_at'         => now(),
                 ];
+
+                // 🚀 SINKRONISASI FIKS SAKTI: Update tabel Patients agar gambar terisi dan otomatis hilang dari antrean antre PACS harian
+                $patient = Patient::where('no_rm', $norm)->first();
+                if ($patient) {
+                    $patient->update([
+                        'radiology_image'  => $savedImagePath,
+                        'radiology_kesan'  => $request->input('radiology_kesan'),
+                        'radiology_doctor' => $request->input('radiology_doctor', 'Dr. Radiolog')
+                    ]);
+                }
             } else {
                 $insertPayload = [
                     'patient_id'         => $norm,
@@ -336,7 +358,7 @@ class ClinicalDataController extends Controller
                     'radiology_kesan'    => $lastDraft?->radiology_kesan ?? null,
                     'radiology_doctor'   => $lastDraft?->radiology_doctor ?? null,
                     'radiology_image'    => $lastDraft?->radiology_image ?? null,
-                    'date'               => $todayIso, // 🚀 LOCK TANGGAL VALIDASI RME DOKTER
+                    'date'               => $todayIso, 
                     'status'             => 'verified',
                     'created_at'         => now(),
                     'updated_at'         => now(),
