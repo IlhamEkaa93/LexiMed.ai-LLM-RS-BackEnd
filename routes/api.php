@@ -17,13 +17,13 @@ use App\Models\User;
 |--------------------------------------------------------------------------
 |
 | Engine rute utama terintegrasi murni databases cloud Supabase.
-| v6.6 - FIXED CHANNELS (SINKRONISASI MUTLAK ANTREAN MULTI-WEEK PACS)
+| v6.7 - FIXED CHANNELS (SINKRONISASI JAM REAL-TIME KNOWLEDGE BASE)
 |
 */
 
 Route::get('/unauthorized', function () {
-    return response()->json(['success' => false, 'message' => 'Sesi Berakhir.'], 401);
-})->name('login');
+    return response()->json(['success' => false, 'message' => 'Sesi Berakhir.'], 401) ->name('login');
+});
 
 // ── AUTENTIKASI UTAMA TOKEN GENERATOR ──
 Route::post('/token', function (Request $request) {
@@ -224,18 +224,15 @@ Route::middleware('auth:sanctum')->group(function () {
         }
     });
 
-    // ── 🚀 FIX SAKTI: PATIENTS INTERACTIVE LIVE QUEUE NODE (SINKRON ANTREAN HARIAN & HISTORIS DOKTER) ──
+    // ── 🚀 PATIENTS INTERACTIVE LIVE QUEUE NODE ──
     Route::get('/patients-list', function () {
         try {
             $todayIso = date('Y-m-d');
-
-            // Mengambil semua pasien yang terdaftar HARI INI ATAU memiliki order penunjang aktif di tabel clinical_data
             $patients = DB::table('patients')
                 ->whereDate('created_at', $todayIso)
                 ->orWhere('date', $todayIso)
-                ->orWhereNotNull('radiology_modality') // Menjamin berkas rujukan lama/baru tetap terangkat ke antrean
-                ->orderBy('updated_at', 'desc')
-                ->get();
+                ->orWhereNotNull('radiology_modality') 
+                ->orderBy('updated_at', 'desc');
 
             $mappedPatients = $patients->map(function($p) use ($todayIso) {
                 $pData = (array) $p;
@@ -280,7 +277,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/users/{id}',   [UserController::class, 'update']);
     Route::delete('/users/{id}', [UserController::class, 'destroy']);
 
-    // ── KNOWLEDGE BASE ──
+    // ── KNOWLEDGE BASE GET LIST DOKUMEN ──
     Route::get('/knowledge', function () {
         try {
             return response()->json(['success' => true, 'data' => DB::table('knowledge_bases')->orderBy('created_at', 'desc')->get()], 200);
@@ -289,6 +286,7 @@ Route::middleware('auth:sanctum')->group(function () {
         }
     });
 
+    // ── 🚀 UPGRADE: KNOWLEDGE BASE INJECTION GATEWAY WITH NATIVE TIME EXTRACTION ──
     Route::post('/knowledge', function (Request $request) {
         try {
             $fileName = 'document.pdf';
@@ -298,15 +296,19 @@ Route::middleware('auth:sanctum')->group(function () {
                 $file->move('/tmp', $fileName);
             }
 
+            // Menangkap jam aktual lokal saat file biner SOP masuk ke sirkuit
+            $currentTimeString = date('H:i:s'); 
+
             DB::table('knowledge_bases')->insert([
-                'title'       => $request->title ?? 'Dokumen Tanpa Judul',
-                'category'    => $request->category ?? 'General',
-                'file_path'   => '/tmp/' . $fileName,
-                'version'     => $request->version ?? '1.0',
-                'description' => 'Diunggah via Cloud Node',
-                'status'      => 'ready',
-                'created_at'  => now(),
-                'updated_at'  => now(),
+                'title'        => $request->title ?? 'Dokumen Tanpa Judul',
+                'category'     => $request->category ?? 'General',
+                'file_path'    => '/tmp/' . $fileName,
+                'version'      => $request->version ?? '1.0',
+                'description'  => $request->description ?? 'Kompilasi Vektor SOP Terintegrasi',
+                'status'       => 'ready',
+                'created_time' => $currentTimeString, // 🚀 REKAM JAM RIIL KE KOLOM DATABASE SUPABASE
+                'created_at'   => now(),
+                'updated_at'   => now(),
             ]);
 
             if (Auth::check()) {
@@ -314,7 +316,7 @@ Route::middleware('auth:sanctum')->group(function () {
                 DB::table('audit_logs')->insert([
                     'user_id'     => $user->id,
                     'action'      => 'KNOWLEDGE INJECT',
-                    'description' => "Admin {$user->name} inject Vector DB: {$fileName}",
+                    'description' => "Admin {$user->name} inject Vector DB: {$fileName} pada jam {$currentTimeString}",
                     'created_at'  => now(),
                     'updated_at'  => now(),
                 ]);
