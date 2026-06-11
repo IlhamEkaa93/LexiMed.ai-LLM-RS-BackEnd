@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\ClinicalData;
-use App\Models\Patient; // 🚀 INJEKSI: Panggil Model Patient agar sinkron lintas tabel
+use App\Models\Patient;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -13,20 +13,54 @@ use Symfony\Component\Process\Process;
 
 class ClinicalDataController extends Controller
 {
+    // ─────────────────────────────────────────────────────────────────────────
+    // HELPER: Normalisasi no_rm — selalu kembalikan format TANPA prefix "RM-"
+    // Contoh: "RM-001" → "001", "001" → "001"
+    // ─────────────────────────────────────────────────────────────────────────
+    private function normalizeNorm(string $norm): string
+    {
+        return ltrim(str_replace('RM-', '', $norm), '0') 
+            ? ltrim(str_replace('RM-', '', $norm)) 
+            : $norm;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // HELPER: Cari Patient dengan toleransi format no_rm (dengan/tanpa "RM-")
+    // ─────────────────────────────────────────────────────────────────────────
+    private function findPatient(string $norm): ?Patient
+    {
+        $withPrefix    = str_starts_with($norm, 'RM-') ? $norm : 'RM-' . $norm;
+        $withoutPrefix = str_starts_with($norm, 'RM-') ? substr($norm, 3) : $norm;
+
+        return Patient::where('no_rm', $norm)
+            ->orWhere('no_rm', $withPrefix)
+            ->orWhere('no_rm', $withoutPrefix)
+            ->first();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // HELPER: Cari ClinicalData terbaru dengan toleransi format patient_id
+    // ─────────────────────────────────────────────────────────────────────────
+    private function findLatestClinical(string $norm): ?ClinicalData
+    {
+        $withPrefix    = str_starts_with($norm, 'RM-') ? $norm : 'RM-' . $norm;
+        $withoutPrefix = str_starts_with($norm, 'RM-') ? substr($norm, 3) : $norm;
+
+        return ClinicalData::where('patient_id', $norm)
+            ->orWhere('patient_id', $withPrefix)
+            ->orWhere('patient_id', $withoutPrefix)
+            ->latest()
+            ->first();
+    }
+
     /**
      * 1. SHOW: Data klinis terbaru + TTV + status radiologi terkini.
      */
     public function show($norm)
     {
         try {
-            $patientProfile = DB::table('patients')
-                ->where('no_rm', $norm)
-                ->orWhere('no_rm', 'RM-' . $norm)
-                ->first();
-
-            $clinicalData = ClinicalData::where('patient_id', $norm)
-                ->latest()
-                ->first();
+            $patientProfile = $this->findPatient($norm);
+            $clinicalData   = $this->findLatestClinical($norm);
 
             if ($patientProfile || $clinicalData) {
                 return response()->json([
@@ -59,7 +93,7 @@ class ClinicalDataController extends Controller
     }
 
     /**
-     * 2. STORE: Input data rekam medis awal oleh dokter poliklinik atau asisten node.
+     * 2. STORE: Input data rekam medis awal oleh dokter poliklinik.
      */
     public function store(Request $request)
     {
@@ -74,8 +108,6 @@ class ClinicalDataController extends Controller
         ]);
 
         try {
-            $todayIso = date('Y-m-d');
-
             $data = ClinicalData::create([
                 'patient_id'        => $validated['patient_id'],
                 'blood_pressure'    => $request->blood_pressure ?? '---/--',
@@ -83,9 +115,9 @@ class ClinicalDataController extends Controller
                 'temperature'       => $request->temperature ?? '--',
                 'oxygen_saturation' => $request->oxygen_saturation ?? '--',
                 'raw_content'       => $validated['raw_content'],
-                'date'              => $todayIso, 
+                'date'              => date('Y-m-d'),
                 'status'            => 'draft',
-                '制造_at'           => now(),
+                'created_at'        => now(),
             ]);
 
             if ($request->has('custom_prompt')) {
@@ -99,56 +131,51 @@ class ClinicalDataController extends Controller
 
             return response()->json(['success' => true, 'data' => ClinicalData::find($data->id)], 201);
         } catch (\Exception $e) {
-            Log::error("Gagal simpan ClinicalData Master Model: " . $e->getMessage());
+            Log::error("Gagal simpan ClinicalData: " . $e->getMessage());
             return response()->json(['success' => false, 'error' => $e->getMessage()], 500);
         }
     }
 
     /**
-     * 3. GENERATE AI: Orkestrasi Dual-Engine Berantai (OpenClaw Gateway -> Voltagent Refiner)
+     * 3. GENERATE AI: Orkestrasi Dual-Engine Berantai
      */
     public function generateAI($norm, Request $request)
     {
         $request->validate(['raw_text' => 'required|string', 'custom_prompt' => 'nullable|string']);
 
         try {
-            $rawText = $request->raw_text;
+            $rawText      = $request->raw_text;
             $customPrompt = $request->custom_prompt ?? 'Analisis catatan medis ini.';
 
             $openClawPath = app_path('Agents/OpenClaw/openclaw_gateway.py');
             $voltaPath    = app_path('Agents/Voltagent/main.py');
 
-            // --- STEP 1: PROSES DATA VIA OPENCLAW SECURE GATEWAY ---
-            $openClawCmd = ['python3', $openClawPath, '--text', $rawText, '--prompt', $customPrompt];
+            $openClawCmd     = ['python3', $openClawPath, '--text', $rawText, '--prompt', $customPrompt];
             $openClawProcess = new Process($openClawCmd);
             $openClawProcess->setTimeout(30);
             $openClawProcess->run();
 
             if (!$openClawProcess->isSuccessful()) {
-                throw new \Exception("OpenClaw Secure Gateway Node Error: " . $openClawProcess->getErrorOutput());
+                throw new \Exception("OpenClaw Error: " . $openClawProcess->getErrorOutput());
             }
 
             $gatewayResultJson = trim($openClawProcess->getOutput());
 
-            // --- STEP 2: PROSES TRANSFER PAYLOAD KE VOLTAGENT REFINER ---
-            $voltaCmd = ['python3', $voltaPath, '--gateway_json', $gatewayResultJson];
+            $voltaCmd     = ['python3', $voltaPath, '--gateway_json', $gatewayResultJson];
             $voltaProcess = new Process($voltaCmd);
             $voltaProcess->setTimeout(30);
             $voltaProcess->run();
 
             if ($voltaProcess->isSuccessful()) {
-                $aiResult = trim($voltaProcess->getOutput());
-
-                $clinicalData = ClinicalData::where('patient_id', $norm)->latest()->first();
+                $aiResult     = trim($voltaProcess->getOutput());
+                $clinicalData = $this->findLatestClinical($norm);
                 if ($clinicalData) {
                     $clinicalData->update(['ai_summary' => $aiResult]);
                 }
-
                 return response()->json(['success' => true, 'summary' => $aiResult], 200);
             }
 
-            throw new \Exception("Voltagent Refiner Processing Error: " . $voltaProcess->getErrorOutput());
-
+            throw new \Exception("Voltagent Error: " . $voltaProcess->getErrorOutput());
         } catch (\Exception $e) {
             Log::error("Hybrid AI Pipeline Failure: " . $e->getMessage());
             return $this->generateAIFallbackDirect($norm, $request);
@@ -156,19 +183,20 @@ class ClinicalDataController extends Controller
     }
 
     /**
-     * Helper Fallback: Eksekusi Direct Groq API jika Pipeline Hybrid Offline
+     * Helper Fallback: Direct Groq API
      */
     private function generateAIFallbackDirect($norm, Request $request)
     {
-        $apiKey = env('GROQ_API_KEY', '');
-        $systemInstruction = $request->input('custom_prompt') ?? 'Anda adalah asisten dokter profesional di Rumah Sakit. Rapikan catatan medis mentah menjadi narasi ringkasan klinis yang terstruktur dan baku dalam bahasa Indonesia medis.';
-        
+        $apiKey           = env('GROQ_API_KEY', '');
+        $systemInstruction = $request->input('custom_prompt') 
+            ?? 'Anda adalah asisten dokter profesional di Rumah Sakit. Rapikan catatan medis mentah menjadi narasi ringkasan klinis yang terstruktur dan baku dalam bahasa Indonesia medis.';
+
         $response = Http::withHeaders([
             'Authorization' => 'Bearer ' . $apiKey,
             'Content-Type'  => 'application/json',
         ])->timeout(45)->post('https://api.groq.com/openai/v1/chat/completions', [
-            'model'    => 'llama-3.3-70b-versatile',
-            'messages' => [
+            'model'       => 'llama-3.3-70b-versatile',
+            'messages'    => [
                 ['role' => 'system', 'content' => $systemInstruction],
                 ['role' => 'user',   'content' => 'Tolong rapikan catatan mentah pasien ini: ' . $request->raw_text],
             ],
@@ -176,15 +204,15 @@ class ClinicalDataController extends Controller
         ]);
 
         if ($response->successful()) {
-            $aiResult = $response->json('choices.0.message.content');
-            $clinicalData = ClinicalData::where('patient_id', $norm)->latest()->first();
-            if ($clinicalData) { 
-                $clinicalData->update(['ai_summary' => $aiResult]); 
+            $aiResult     = $response->json('choices.0.message.content');
+            $clinicalData = $this->findLatestClinical($norm);
+            if ($clinicalData) {
+                $clinicalData->update(['ai_summary' => $aiResult]);
             }
             return response()->json(['success' => true, 'summary' => $aiResult], 200);
         }
 
-        return response()->json(['success' => false, 'message' => 'Seluruh core kecerdasan buatan terisolasi.'], 500);
+        return response()->json(['success' => false, 'message' => 'Seluruh core AI terisolasi.'], 500);
     }
 
     /**
@@ -223,14 +251,21 @@ class ClinicalDataController extends Controller
 
     /**
      * 5. RADIOLOGY ORDER: Kirim instruksi rujukan dari poliklinik ke unit radiologi.
+     *
+     * FIX: Pakai findPatient() agar toleran format no_rm (dengan/tanpa "RM-")
+     * FIX: Reset radiology_image di patients tabel saat ada order baru
+     * FIX: touch() dipanggil agar baris naik ke atas antrean /patients-list
      */
     public function storeRadiologyOrder(Request $request, $norm)
     {
-        $request->validate(['radiology_modality' => 'required|string', 'catatan_rujukan' => 'nullable|string']);
+        $request->validate([
+            'radiology_modality' => 'required|string',
+            'catatan_rujukan'    => 'nullable|string',
+        ]);
 
         try {
-            $todayIso = date('Y-m-d');
-            $clinicalData = ClinicalData::where('patient_id', $norm)->latest()->first();
+            $todayIso     = date('Y-m-d');
+            $clinicalData = $this->findLatestClinical($norm);
 
             if (!$clinicalData) {
                 ClinicalData::create([
@@ -256,20 +291,31 @@ class ClinicalDataController extends Controller
                 ]);
             }
 
-            // 🚀 SINKRONISASI FIKS SAKTI: Update juga ke tabel Patients agar dibaca Antrean PACS harian!
-            $patient = Patient::where('no_rm', $norm)->first();
+            // ── FIX UTAMA: Pakai findPatient() agar toleran format RM prefix ──
+            $patient = $this->findPatient($norm);
+
             if ($patient) {
                 $patient->update([
                     'radiology_modality' => $request->radiology_modality,
-                    'radiology_image'    => null, // Reset jika ada rujukan baru
+                    'radiology_image'    => null, // ⚠️ Reset agar muncul di antrean PACS
                     'radiology_kesan'    => null,
-                    'radiology_doctor'   => null
+                    'radiology_doctor'   => null,
+                    'date'               => $todayIso, // FIX: Update date agar patients-list query cocok
                 ]);
-                // Paksa updated_at naik ke atas antrean
+                // Paksa updated_at naik ke atas antrean harian
                 $patient->touch();
+
+                Log::info("Radiology order synced to patients table: no_rm={$patient->no_rm}, modality={$request->radiology_modality}");
+            } else {
+                // ⚠️ WARNING: Patient tidak ditemukan — data hanya masuk clinical_data, tidak ke patients
+                Log::warning("storeRadiologyOrder: Patient not found for norm={$norm}. Radiology order saved to clinical_data only.");
             }
 
-            return response()->json(['success' => true, 'message' => 'Instruksi rujukan berhasil disimpan.'], 200);
+            return response()->json([
+                'success' => true,
+                'message' => 'Instruksi rujukan berhasil disimpan.',
+                'patient_synced' => $patient !== null, // Feedback ke frontend
+            ], 200);
         } catch (\Exception $e) {
             Log::error("Gagal storeRadiologyOrder: " . $e->getMessage());
             return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
@@ -282,33 +328,29 @@ class ClinicalDataController extends Controller
     private function getSafeUserId(): int
     {
         $user = auth()->user();
-        if ($user) {
-            return (int) $user->id;
-        }
-        return 1;
+        return $user ? (int) $user->id : 1;
     }
 
     /**
-     * 6. VERIFY — GERBANG TUNGGAL UNTUK DUA SUMBER TIMELINE
+     * 6. VERIFY — Gerbang tunggal untuk dua sumber timeline
      */
     public function verify(Request $request, $norm)
     {
         DB::beginTransaction();
         try {
-            $todayIso = date('Y-m-d');
-            $lastDraft = ClinicalData::where('patient_id', $norm)->latest()->first();
-            $isRadiologPath = $request->has('radiology_kesan') || $request->has('base64_image');
-            $savedImagePath = $lastDraft?->radiology_image;
+            $todayIso        = date('Y-m-d');
+            $lastDraft       = $this->findLatestClinical($norm);
+            $isRadiologPath  = $request->has('radiology_kesan') || $request->has('base64_image');
+            $savedImagePath  = $lastDraft?->radiology_image;
 
             if ($request->filled('base64_image')) {
                 $base64Data  = $request->base64_image;
-                $mime = $request->input('image_mime', 'image/jpeg');
-                $extension = ($mime === 'image/png') ? 'png' : 'jpg';
-
+                $mime        = $request->input('image_mime', 'image/jpeg');
+                $extension   = ($mime === 'image/png') ? 'png' : 'jpg';
                 $imageDecoded = base64_decode($base64Data);
-                $fileName = time() . '_pacs_' . $norm . '.' . $extension;
+                $fileName    = time() . '_pacs_' . $norm . '.' . $extension;
+                $publicPath  = public_path('storage/radiology/');
 
-                $publicPath = public_path('storage/radiology/');
                 if (!file_exists($publicPath)) {
                     mkdir($publicPath, 0777, true);
                 }
@@ -330,19 +372,19 @@ class ClinicalDataController extends Controller
                     'radiology_kesan'    => $request->input('radiology_kesan'),
                     'radiology_doctor'   => $request->input('radiology_doctor', 'Dr. Radiolog'),
                     'radiology_image'    => $savedImagePath,
-                    'date'               => $todayIso, 
+                    'date'               => $todayIso,
                     'status'             => 'verified',
                     'created_at'         => now(),
                     'updated_at'         => now(),
                 ];
 
-                // 🚀 SINKRONISASI FIKS SAKTI: Update tabel Patients agar gambar terisi dan otomatis hilang dari antrean antre PACS harian
-                $patient = Patient::where('no_rm', $norm)->first();
+                // Sync ke tabel patients agar pasien hilang dari antrean PACS setelah diverifikasi
+                $patient = $this->findPatient($norm);
                 if ($patient) {
                     $patient->update([
                         'radiology_image'  => $savedImagePath,
                         'radiology_kesan'  => $request->input('radiology_kesan'),
-                        'radiology_doctor' => $request->input('radiology_doctor', 'Dr. Radiolog')
+                        'radiology_doctor' => $request->input('radiology_doctor', 'Dr. Radiolog'),
                     ]);
                 }
             } else {
@@ -358,7 +400,7 @@ class ClinicalDataController extends Controller
                     'radiology_kesan'    => $lastDraft?->radiology_kesan ?? null,
                     'radiology_doctor'   => $lastDraft?->radiology_doctor ?? null,
                     'radiology_image'    => $lastDraft?->radiology_image ?? null,
-                    'date'               => $todayIso, 
+                    'date'               => $todayIso,
                     'status'             => 'verified',
                     'created_at'         => now(),
                     'updated_at'         => now(),
@@ -379,7 +421,7 @@ class ClinicalDataController extends Controller
             DB::table('audit_logs')->insert([
                 'user_id'     => $safeUserId,
                 'action'      => 'TIMELINE_SYNCHRONIZATION',
-                'description' => "Sinkronisasi sirkuit biner lini masa untuk No. RM: {$norm} selesai.",
+                'description' => "Sinkronisasi lini masa selesai untuk No. RM: {$norm}.",
                 'created_at'  => now(),
                 'updated_at'  => now(),
             ]);

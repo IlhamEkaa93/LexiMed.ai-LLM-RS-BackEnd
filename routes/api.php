@@ -17,7 +17,7 @@ use App\Models\User;
 |--------------------------------------------------------------------------
 |
 | Engine rute utama terintegrasi murni databases cloud Supabase.
-| v6.5 - FIXED CHANNELS (SINKRONISASI TOTAL ENGINES LINTAS WORKSTATION)
+| v6.6 - FIXED CHANNELS (SINKRONISASI MUTLAK ANTREAN MULTI-WEEK PACS)
 |
 */
 
@@ -114,9 +114,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/radiology/dashboard', function () {
         return response()->json([
             'stats' => [
-                'total_scans'      => DB::table('clinical_data')->where('source', 'radiologi')->count(),
-                'pending_analysis' => DB::table('clinical_data')->where('source', 'radiologi')->where('status', 'draft')->count(),
-                'ai_verified'      => DB::table('clinical_data')->where('source', 'radiologi')->where('status', 'verified')->count(),
+                'total_scans'      => DB::table('clinical_data')->whereNotNull('radiology_modality')->count(),
+                'pending_analysis' => DB::table('clinical_data')->whereNotNull('radiology_modality')->whereNull('radiology_image')->count(),
+                'ai_verified'      => DB::table('clinical_data')->whereNotNull('radiology_modality')->whereNotNull('radiology_image')->count(),
             ],
             'recent_work' => [],
         ], 200);
@@ -214,7 +214,7 @@ Route::middleware('auth:sanctum')->group(function () {
         }
     });
 
-    // ── 🚀 FIX MUTLAK: ENDPOINT MASTER DATA TOTAL UNTUK NODE ADMIN LINTAS MINGGU ──
+    // ── 🚀 ENDPOINT MASTER DATA TOTAL UNTUK NODE ADMIN LINTAS MINGGU ──
     Route::get('/patients-master', function () {
         try {
             $patients = DB::table('patients')->orderBy('updated_at', 'desc')->get();
@@ -224,16 +224,17 @@ Route::middleware('auth:sanctum')->group(function () {
         }
     });
 
-    // ── PATIENTS INTERACTIVE LIVE QUEUE NODE (DOKTER KUNCI HARI INI) ──
+    // ── 🚀 FIX SAKTI: PATIENTS INTERACTIVE LIVE QUEUE NODE (SINKRON ANTREAN HARIAN & HISTORIS DOKTER) ──
     Route::get('/patients-list', function () {
         try {
             $todayIso = date('Y-m-d');
 
-            // Narasi query riil Supabase mengecek created_at harian ATAU kolom date baru hasil mutasi
+            // Mengambil semua pasien yang terdaftar HARI INI ATAU memiliki order penunjang aktif di tabel clinical_data
             $patients = DB::table('patients')
                 ->whereDate('created_at', $todayIso)
                 ->orWhere('date', $todayIso)
-                ->orderBy('updated_at', 'desc') // Urutkan berbasis detik perubahan teranyar
+                ->orWhereNotNull('radiology_modality') // Menjamin berkas rujukan lama/baru tetap terangkat ke antrean
+                ->orderBy('updated_at', 'desc')
                 ->get();
 
             $mappedPatients = $patients->map(function($p) use ($todayIso) {
@@ -274,8 +275,8 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // ── USERS CRUD ──
-    Route::get('/users',          [UserController::class, 'index']);
-    Route::post('/users',         [UserController::class, 'store']);
+    Route::get('/users',         [UserController::class, 'index']);
+    Route::post('/users',        [UserController::class, 'store']);
     Route::put('/users/{id}',   [UserController::class, 'update']);
     Route::delete('/users/{id}', [UserController::class, 'destroy']);
 
@@ -336,7 +337,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // ── HIERARKI DUAL-ENGINE INTERCEPTOR ENDPOINT ──
-    Route::post('/agents/openclaw/chat',    [ClinicalDataController::class, 'triggerOpenClaw']);
+    Route::post('/agents/openclaw/chat',     [ClinicalDataController::class, 'triggerOpenClaw']);
     Route::post('/agents/voltagent/analyze', [ClinicalDataController::class, 'triggerVoltagent']);
 
 });
