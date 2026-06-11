@@ -16,7 +16,7 @@ use App\Models\User;
 | API Routes — LEXIMED.AI PRIVILEGED CORE PROTOCOL
 |--------------------------------------------------------------------------
 |
-| Engine rute utama terintegrasi murni database cloud Supabase.
+| Engine rute utama terintegrasi murni databases cloud Supabase.
 | v6.5 - FIXED CHANNELS (SINKRONISASI TOTAL ENGINES LINTAS WORKSTATION)
 |
 */
