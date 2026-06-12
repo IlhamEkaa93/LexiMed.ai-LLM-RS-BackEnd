@@ -11,10 +11,13 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('patients', function (Blueprint $table) {
-            // Menyisipkan kolom date riil bertipe DATE tepat setelah kolom status_treatment
-            $table->date('date')->nullable()->after('status_treatment');
-        });
+        // 🚀 HOTFIX SECURED: Cek dhisik, nek kolom 'date' durung ono ing Supabase, nembe digawe ben ora duplicate error
+        if (!Schema::hasColumn('patients', 'date')) {
+            Schema::table('patients', function (Blueprint $table) {
+                // Menyisipkan kolom date riil bertipe DATE tepat setelah kolom status_treatment
+                $table->date('date')->nullable()->after('status_treatment');
+            });
+        }
     }
 
     /**
@@ -22,9 +25,12 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::table('patients', function (Blueprint $table) {
-            // Menghapus kolom date saat proses rollback berjalan
-            $table->dropColumn('date');
-        });
+        // Pengaman tambahan nalika rollback dijalankan
+        if (Schema::hasColumn('patients', 'date')) {
+            Schema::table('patients', function (Blueprint $table) {
+                // Menghapus kolom date saat proses rollback berjalan
+                $table->dropColumn('date');
+            });
+        }
     }
 };
